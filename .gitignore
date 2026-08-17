@@ -47,3 +47,8 @@ venv.bak/
 # Operating System files
 .DS_Store
 Thumbs.db
+
+# Build-generated Security Artifacts & SBOMs
+security-artifacts/*.json
+security-artifacts/*.spdx.json
+*.spdx.json
