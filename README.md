@@ -1,9 +1,10 @@
 # SigChain-SLSA – Secure Software Supply Chain Verification Platform
 
 **Phase 1: Basic Application and CI/CD Foundation**  
-**Phase 2: Software Bill of Materials (SBOM) Generation with Syft**
+**Phase 2: Software Bill of Materials (SBOM) Generation with Syft**  
+**Phase 3: Automated Vulnerability Scanning with Trivy**
 
-SigChain-SLSA is a security platform project designed to demonstrate DevSecOps practices and SLSA (Supply-chain Levels for Software Artifacts) framework compliance. This repository contains the base Python Flask microservice secured across supply-chain pipeline phases, featuring automated container builds and SPDX-JSON SBOM generation.
+SigChain-SLSA is a security platform project designed to demonstrate DevSecOps practices and SLSA (Supply-chain Levels for Software Artifacts) framework compliance. This repository contains the base Python Flask microservice secured across supply-chain pipeline phases, featuring automated container builds, SPDX-JSON SBOM generation, and automated vulnerability scanning.
 
 ---
 
@@ -14,15 +15,15 @@ sigchain-slsa/
 ├── app/
 │   ├── app.py                  # Core Flask application (homepage & /health endpoints)
 │   └── requirements.txt        # Python dependencies (Flask, Gunicorn)
-├── security-artifacts/         # Output directory for security artifacts & SBOMs
-│   └── .gitkeep                # Placeholder for git tracking (JSON artifacts gitignored)
+├── security-artifacts/         # Output directory for security artifacts, SBOMs & scan reports
+│   └── .gitkeep                # Placeholder for git tracking (generated reports gitignored)
 ├── Dockerfile                  # Secure multi-stage container build file
 ├── .dockerignore               # Excludes unnecessary files from Docker build context
 ├── .gitignore                  # Ignores local environment & cache files from Git
 ├── README.md                   # Project documentation
 └── .github/
     └── workflows/
-        └── docker-build.yml    # CI/CD automation workflow (Build & SBOM generation)
+        └── docker-build.yml    # CI/CD automation workflow (Build, SBOM & Vulnerability Scan)
 ```
 
 ---
@@ -33,6 +34,7 @@ sigchain-slsa/
 - Python 3.11+
 - Docker (optional, for containerization testing)
 - [Syft](https://github.com/anchore/syft) CLI (optional, for local SBOM generation)
+- [Trivy](https://github.com/aquasecurity/trivy) CLI (optional, for local vulnerability scanning)
 
 ---
 
@@ -109,7 +111,7 @@ A **Software Bill of Materials (SBOM)** is a formal, machine-readable inventory 
 
 ### 2. Why is an SBOM Important for Software Supply-Chain Security?
 - **Component Transparency:** Provides complete visibility into third-party dependencies and operating system packages inside containers.
-- **Vulnerability Management & Incident Response:** Enables rapid identification of vulnerable components when new CVEs (e.g., Log4j) are disclosed.
+- **Vulnerability Management & Incident Response:** Enables rapid identification of vulnerable components when new CVEs are disclosed.
 - **Compliance & License Audit:** Helps ensure compliance with open-source licensing requirements and enterprise security policies.
 - **Supply-Chain Assurance:** Forms a foundational building block for SLSA compliance and secure software provenance.
 
@@ -144,13 +146,79 @@ The SBOM file is created at:
 ```text
 security-artifacts/sbom.spdx.json
 ```
-*Note: Generated SBOM files in `security-artifacts/*.json` and `*.spdx.json` are added to `.gitignore` to prevent build artifacts from being committed to source control.*
 
 ### 7. How to Download the SBOM from GitHub Actions
 1. Navigate to the **Actions** tab in your GitHub repository.
 2. Select the latest **Docker Build CI** workflow run.
 3. Scroll down to the **Artifacts** section at the bottom of the run summary page.
 4. Click on **`sbom-spdx-json`** to download the zip file containing `sbom.spdx.json`.
+
+---
+
+## 🔍 Phase 3: Automated Vulnerability Scanning with Trivy
+
+### 1. What is Vulnerability Scanning?
+**Vulnerability scanning** is an automated security testing process that analyzes software artifacts (such as container images, source code repositories, and dependency manifests) against public security databases to detect known security flaws and unpatched software bugs.
+
+### 2. What is a CVE?
+A **CVE (Common Vulnerabilities and Exposures)** is a standardized, unique dictionary identifier assigned to publicly disclosed cybersecurity vulnerabilities (e.g., `CVE-2023-30861`). CVE IDs allow security engineers and automated scanners to uniquely track and correlate vulnerabilities across security databases (NVD, GHSA, Debian Security Tracker).
+
+### 3. Why is Vulnerability Scanning Important?
+- **Early Vulnerability Detection:** Detects known security flaws in container OS layers and application dependencies before code is deployed.
+- **Proactive Risk Mitigation:** Highlights available patch versions (`Fixed Version`) so developers can upgrade vulnerable libraries.
+- **Supply-Chain Hardening:** Ensures that transitive or nested dependencies do not introduce silent attack vectors into production systems.
+
+### 4. What is Trivy?
+[Trivy](https://github.com/aquasecurity/trivy) is a comprehensive, open-source security scanner developed by Aqua Security. It quickly scans container images, filesystems, Git repositories, and VM images for vulnerabilities, misconfigurations, and exposed secrets.
+
+### 5. What Parts of the Container are Scanned?
+Trivy scans two primary component layers inside `sigchain-demo:latest`:
+1. **OS Packages:** Linux distribution packages installed in `python:3.11-slim` via `dpkg`/`apt` (e.g., `openssl`, `glibc`, `zlib`, `bash`).
+2. **Application Dependencies:** Python packages installed via `pip` (e.g., `Flask`, `Gunicorn`, `Werkzeug`, `jinja2`, `click`, `setuptools`).
+
+### 6. What Do the Severity Levels Mean?
+Trivy categorizes identified vulnerabilities into five standard severity levels:
+- **`CRITICAL`:** High-impact vulnerabilities (e.g., remote code execution, unauthenticated access) that present immediate risk and should be remediated urgently.
+- **`HIGH`:** Serious vulnerabilities (e.g., privilege escalation, data leakage) that require prioritized patching.
+- **`MEDIUM`:** Moderate risk issues (e.g., denial of service under specific conditions, limited information disclosure).
+- **`LOW`:** Low risk or minor issues with low exploitability impact.
+- **`UNKNOWN`:** Vulnerabilities reported without assigned CVSS scores or severity ratings in vulnerability feeds.
+
+### 7. How to Scan the Docker Image Locally
+Build `sigchain-demo:latest` first:
+```bash
+docker build -t sigchain-demo:latest .
+```
+
+Scan the container image using Trivy CLI:
+```bash
+trivy image sigchain-demo:latest
+```
+
+Generate local report files (JSON and human-readable text table):
+```bash
+trivy image --format json --output security-artifacts/trivy-report.json sigchain-demo:latest
+trivy image --format table --output security-artifacts/trivy-report.txt sigchain-demo:latest
+```
+
+*(Alternatively, if Trivy CLI is not installed locally, run Trivy via Docker):*
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ./security-artifacts:/out aquasec/trivy:0.58.0 image --format json --output /out/trivy-report.json sigchain-demo:latest
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ./security-artifacts:/out aquasec/trivy:0.58.0 image --format table --output /out/trivy-report.txt sigchain-demo:latest
+```
+
+### 8. Where are Vulnerability Reports Stored?
+Vulnerability scan reports are generated in the `security-artifacts/` directory:
+- **`security-artifacts/trivy-report.json`**: Machine-readable JSON report containing complete CVE details, target metadata, and package references.
+- **`security-artifacts/trivy-report.txt`**: Human-readable table report listing CVE IDs, package names, installed versions, fixed versions, severity, and titles.
+
+*Note: All generated vulnerability report files in `security-artifacts/*.json` and `security-artifacts/*.txt` are added to `.gitignore` to prevent build artifacts from being committed to Git.*
+
+### 9. How to Download Vulnerability Reports from GitHub Actions
+1. Navigate to the **Actions** tab in your GitHub repository.
+2. Select the latest **Docker Build CI** workflow run.
+3. Scroll down to the **Artifacts** section at the bottom of the run summary page.
+4. Click on **`vulnerability-reports`** to download the zip bundle containing `trivy-report.json` and `trivy-report.txt`.
 
 ---
 
@@ -171,6 +239,8 @@ The GitHub Actions workflow automatically runs on `push` and `pull_request` even
 2. **Python Setup & Validation:** Installs Python 3.11, validates dependencies, and checks application syntax (`py_compile`).
 3. **Docker Build:** Builds the container image `sigchain-demo:latest` with `load: true` so the image is loaded into the runner's Docker daemon.
 4. **Directory Setup:** Prepares the `security-artifacts/` directory.
-5. **Syft SBOM Analysis:** Analyzes `sigchain-demo:latest` using `anchore/sbom-action@v0.17.9` and generates an `spdx-json` SBOM (`security-artifacts/sbom.spdx.json`).
-6. **Artifact Upload:** Uploads `sbom.spdx.json` as a workflow artifact named `sbom-spdx-json` via `actions/upload-artifact@v4`.
-7. **Build Gate:** Fails the workflow if image building or SBOM generation fails. Image is **not** pushed to external registries.
+5. **Syft SBOM Analysis:** Analyzes `sigchain-demo:latest` using `anchore/sbom-action@v0.17.9` and generates `security-artifacts/sbom.spdx.json`.
+6. **SBOM Artifact Upload:** Uploads `sbom.spdx.json` as artifact `sbom-spdx-json` via `actions/upload-artifact@v4`.
+7. **Trivy Vulnerability Scan:** Scans `sigchain-demo:latest` using `aquasecurity/trivy-action@0.28.0` (`exit-code: '0'`), generating machine-readable JSON (`trivy-report.json`) and human-readable text table (`trivy-report.txt`).
+8. **Log Summary Display:** Prints the human-readable vulnerability table and severity summary directly in the workflow runner log.
+9. **Vulnerability Artifact Upload:** Uploads both vulnerability reports (`trivy-report.json` and `trivy-report.txt`) as artifact bundle `vulnerability-reports`.

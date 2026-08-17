@@ -57,3 +57,39 @@ jobs:
           name: sbom-spdx-json
           path: security-artifacts/sbom.spdx.json
           if-no-files-found: error
+
+      - name: Run Trivy vulnerability scanner (JSON format)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'sigchain-demo:latest'
+          format: 'json'
+          output: 'security-artifacts/trivy-report.json'
+          exit-code: '0'
+          ignore-unfixed: false
+          vuln-type: 'os,library'
+
+      - name: Run Trivy vulnerability scanner (Table format)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'sigchain-demo:latest'
+          format: 'table'
+          output: 'security-artifacts/trivy-report.txt'
+          exit-code: '0'
+          ignore-unfixed: false
+          vuln-type: 'os,library'
+
+      - name: Display Trivy Vulnerability Summary in Log
+        run: |
+          echo "========================================================"
+          echo "           TRIVY VULNERABILITY SUMMARY REPORT           "
+          echo "========================================================"
+          cat security-artifacts/trivy-report.txt
+
+      - name: Upload Vulnerability Reports Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vulnerability-reports
+          path: |
+            security-artifacts/trivy-report.json
+            security-artifacts/trivy-report.txt
+          if-no-files-found: error
