@@ -59,7 +59,7 @@ jobs:
           if-no-files-found: error
 
       - name: Run Trivy vulnerability scanner (JSON format)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: 'sigchain-demo:latest'
           format: 'json'
@@ -69,7 +69,7 @@ jobs:
           vuln-type: 'os,library'
 
       - name: Run Trivy vulnerability scanner (Table format)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: 'sigchain-demo:latest'
           format: 'table'

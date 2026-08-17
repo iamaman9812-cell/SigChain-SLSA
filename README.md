@@ -241,6 +241,6 @@ The GitHub Actions workflow automatically runs on `push` and `pull_request` even
 4. **Directory Setup:** Prepares the `security-artifacts/` directory.
 5. **Syft SBOM Analysis:** Analyzes `sigchain-demo:latest` using `anchore/sbom-action@v0.17.9` and generates `security-artifacts/sbom.spdx.json`.
 6. **SBOM Artifact Upload:** Uploads `sbom.spdx.json` as artifact `sbom-spdx-json` via `actions/upload-artifact@v4`.
-7. **Trivy Vulnerability Scan:** Scans `sigchain-demo:latest` using `aquasecurity/trivy-action@0.28.0` (`exit-code: '0'`), generating machine-readable JSON (`trivy-report.json`) and human-readable text table (`trivy-report.txt`).
+7. **Trivy Vulnerability Scan:** Scans `sigchain-demo:latest` using `aquasecurity/trivy-action@v0.36.0` (`exit-code: '0'`), generating machine-readable JSON (`trivy-report.json`) and human-readable text table (`trivy-report.txt`).
 8. **Log Summary Display:** Prints the human-readable vulnerability table and severity summary directly in the workflow runner log.
 9. **Vulnerability Artifact Upload:** Uploads both vulnerability reports (`trivy-report.json` and `trivy-report.txt`) as artifact bundle `vulnerability-reports`.
