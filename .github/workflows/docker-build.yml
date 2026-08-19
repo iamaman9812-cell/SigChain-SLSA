@@ -112,3 +112,9 @@ jobs:
             cosign.pub
           if-no-files-found: error
 
+      - name: Execute Security Policy Enforcement (Phase 5)
+        run: |
+          chmod +x security/verify-policy.sh
+          ./security/verify-policy.sh
+
+

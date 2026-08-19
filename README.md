@@ -3,9 +3,43 @@
 **Phase 1: Basic Application and CI/CD Foundation**  
 **Phase 2: Software Bill of Materials (SBOM) Generation with Syft**  
 **Phase 3: Automated Vulnerability Scanning with Trivy**  
-**Phase 4: Digital Signing and Signature Verification with Sigstore Cosign**
+**Phase 4: Digital Signing and Signature Verification with Sigstore Cosign**  
+**Phase 5: Security Policy & Policy Enforcement Layer**
 
-SigChain-SLSA is a security platform project designed to demonstrate DevSecOps practices and SLSA (Supply-chain Levels for Software Artifacts) framework compliance. This repository contains the base Python Flask microservice secured across supply-chain pipeline phases, featuring automated container builds, SPDX-JSON SBOM generation, automated vulnerability scanning, and cryptographic digital container signing/verification.
+SigChain-SLSA is a security platform project designed to demonstrate DevSecOps practices and SLSA (Supply-chain Levels for Software Artifacts) framework compliance. This repository contains the base Python Flask microservice secured across supply-chain pipeline phases, featuring automated container builds, SPDX-JSON SBOM generation, automated vulnerability scanning, cryptographic digital signing/verification, and automated policy enforcement.
+
+---
+
+## 🔄 End-to-End Secure Software Supply Chain Pipeline
+
+```text
+Source Code
+    ↓
+Docker Image
+    ↓
+   Syft → SBOM (SPDX-JSON)
+    ↓
+  Trivy → Vulnerability Report
+    ↓
+ Cosign → Digital Signature (Bundle) & Verification
+    ↓
+Security Policy Enforcement
+    ↓
+┌─────────────────────────────────────┐
+│  Passes All 4 Policy Rules?         │
+└──────────────────┬──────────────────┘
+                   │
+         ┌─────────┴─────────┐
+         ↓                   ↓
+       [YES]               [NO]
+         ↓                   ↓
+  SECURITY CHECK:     SECURITY CHECK:
+      PASSED              FAILED
+         ↓                   ↓
+   DECISION: ALLOW     DECISION: BLOCK
+         ↓                   ↓
+  Ready for Deploy     Fail CI Pipeline
+```
 
 ---
 
@@ -18,17 +52,20 @@ sigchain-slsa/
 │   └── requirements.txt        # Python dependencies (Flask, Gunicorn)
 ├── security/                   # Automation & verification scripts
 │   ├── sign-and-verify.sh      # Cosign signing & tamper test script (Linux/macOS)
-│   └── sign-and-verify.ps1     # Cosign signing & tamper test script (Windows PowerShell)
+│   ├── sign-and-verify.ps1     # Cosign signing & tamper test script (Windows PowerShell)
+│   ├── verify-policy.sh        # Phase 5 Security Policy Enforcement script (Linux/macOS/CI)
+│   └── verify-policy.ps1       # Phase 5 Security Policy Enforcement script (Windows PowerShell)
 ├── security-artifacts/         # Output directory for security artifacts, SBOMs & scan reports
 │   └── .gitkeep                # Placeholder for git tracking (generated reports gitignored)
 ├── cosign.pub                  # Public cryptographic verification key (committed to Git)
+├── .gitattributes              # Enforces LF line endings for .sh scripts
 ├── Dockerfile                  # Secure multi-stage container build file
 ├── .dockerignore               # Excludes unnecessary files from Docker build context
 ├── .gitignore                  # Ignores local environment, private keys & build cache
 ├── README.md                   # Project documentation
 └── .github/
     └── workflows/
-        └── docker-build.yml    # CI/CD automation workflow (Build, SBOM, Scan & Cosign Verify)
+        └── docker-build.yml    # CI/CD automation workflow (Build, SBOM, Scan, Sign & Policy Check)
 ```
 
 ---
@@ -315,6 +352,86 @@ cosign verify-blob --key cosign.pub --bundle security-artifacts/image.bundle sec
 
 ---
 
+## 🛡️ Phase 5 – Security Policy & Enforcement Layer
+
+### 1. Why a Security Policy Layer is Required
+Up to Phase 4, security artifacts (SBOM, vulnerability reports, digital signatures) were generated and stored separately. However, security evidence is useless without an **automated enforcement gate**. A security policy layer acts as the final guardrail in DevSecOps pipelines, mathematically verifying all security evidence before deciding whether an image is trusted (`ALLOW`) or untrusted (`BLOCK`).
+
+### 2. The 4 Core Security Policy Rules
+
+| Rule # | Security Evidence Checked | Required Condition | Policy Decision on Failure |
+| :--- | :--- | :--- | :--- |
+| **Rule 1** | **SBOM (Syft)** | `sbom.spdx.json` exists and is non-empty | **`BLOCK`** (Missing Bill of Materials) |
+| **Rule 2** | **Vulnerabilities (Trivy)** | `trivy-report.json` parsed; 0 `CRITICAL` severity CVEs | **`BLOCK`** (Unpatched Critical CVEs found) |
+| **Rule 3** | **Digital Signature (Cosign)** | `image.bundle` exists & verifies against `cosign.pub` | **`BLOCK`** (Unsigned or Invalid Signature) |
+| **Rule 4** | **Artifact Integrity** | SHA-256 manifest hash matches original signed state | **`BLOCK`** (Tampered Container Image) |
+
+### 3. Policy Decision Outcomes
+
+#### PASS / ALLOW (Exit Code 0)
+When all 4 policy rules are satisfied, the policy runner outputs:
+```text
+========================================================
+        SIGCHAIN-SLSA: SECURITY POLICY ENFORCEMENT      
+========================================================
+[PASS] Rule 1: Required SBOM exists (security-artifacts/sbom.spdx.json)
+[PASS] Rule 2: Vulnerability scan completed (Found: 0 CRITICAL vulnerabilities)
+[PASS] Rule 3: Cosign digital signature bundle verified against public key (cosign.pub)
+--------------------------------------------------------
+SECURITY CHECK: PASSED
+FINAL DECISION: ALLOW
+Reason        : All security policy rules satisfied (SBOM present, 0 CRITICAL CVEs, Valid Signature).
+========================================================
+```
+
+#### FAIL / BLOCK (Exit Code 1)
+If any rule fails (e.g. CRITICAL vulnerabilities found or missing signature), the runner outputs:
+```text
+========================================================
+        SIGCHAIN-SLSA: SECURITY POLICY ENFORCEMENT      
+========================================================
+[PASS] Rule 1: Required SBOM exists (security-artifacts/sbom.spdx.json)
+[FAIL] Rule 2: CRITICAL vulnerabilities detected (Found: 2 CRITICAL)
+[PASS] Rule 3: Cosign digital signature bundle verified against public key (cosign.pub)
+--------------------------------------------------------
+SECURITY CHECK: FAILED
+FINAL DECISION: BLOCK
+Enforcement Reasons:
+  - CRITICAL vulnerabilities found (2 CRITICAL)
+========================================================
+```
+
+### 4. How GitHub Actions Enforces the Policy
+In `.github/workflows/docker-build.yml`, `security/verify-policy.sh` runs as the final step. Because Unix scripts exit with code `1` when a policy fails, GitHub Actions immediately halts the runner, failing the workflow run and preventing untrusted images from deploying.
+
+### 5. Local Demonstration Commands (For Evaluators & Professors)
+
+#### Demonstrate PASS / ALLOW Decision:
+- **Linux / macOS (Bash):**
+  ```bash
+  ./security/verify-policy.sh
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  .\security\verify-policy.ps1
+  ```
+
+#### Demonstrate BLOCK Decisions (Test Modes):
+- **Simulate CRITICAL Vulnerability Failure:**
+  ```powershell
+  .\security\verify-policy.ps1 -DemoMode demo-fail-vuln
+  ```
+- **Simulate Missing / Invalid Signature Failure:**
+  ```powershell
+  .\security\verify-policy.ps1 -DemoMode demo-fail-sig
+  ```
+- **Simulate Missing SBOM Failure:**
+  ```powershell
+  .\security\verify-policy.ps1 -DemoMode demo-fail-sbom
+  ```
+
+---
+
 ## 🔒 Security Best Practices Implemented in Dockerfile
 
 1. **Minimal Base Image:** Uses `python:3.11-slim` to reduce the attack surface and image size.
@@ -340,4 +457,6 @@ The GitHub Actions workflow automatically runs on `push` and `pull_request` even
 10. **Sigstore Cosign Installation:** Installs Cosign CLI runner via `sigstore/cosign-installer@v3.8.0`.
 11. **Phase 4 Signing & Verification:** Runs `security/sign-and-verify.sh` to generate key pairs, sign `sigchain-demo:latest` digest bundle, verify against `cosign.pub`, and demonstrate tamper detection.
 12. **Digital Signature Artifact Upload:** Uploads `cosign.pub`, `image-digest.txt`, and `image.bundle` as artifact `digital-signatures`.
+13. **Phase 5 Policy Enforcement:** Executes `security/verify-policy.sh` to evaluate all security evidence and enforce `ALLOW` or `BLOCK` decision.
+
 
