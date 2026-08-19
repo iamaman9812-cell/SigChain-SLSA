@@ -52,4 +52,14 @@ Thumbs.db
 security-artifacts/*.json
 security-artifacts/*.spdx.json
 security-artifacts/*.txt
+security-artifacts/*.sig
+security-artifacts/*.bundle
+security-artifacts/*.pem
 *.spdx.json
+
+# Cosign Cryptographic Keys & Secrets (DO NOT COMMIT PRIVATE KEYS)
+*.key
+cosign.key
+*.exe
+
+

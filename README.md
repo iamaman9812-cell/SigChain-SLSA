@@ -2,9 +2,10 @@
 
 **Phase 1: Basic Application and CI/CD Foundation**  
 **Phase 2: Software Bill of Materials (SBOM) Generation with Syft**  
-**Phase 3: Automated Vulnerability Scanning with Trivy**
+**Phase 3: Automated Vulnerability Scanning with Trivy**  
+**Phase 4: Digital Signing and Signature Verification with Sigstore Cosign**
 
-SigChain-SLSA is a security platform project designed to demonstrate DevSecOps practices and SLSA (Supply-chain Levels for Software Artifacts) framework compliance. This repository contains the base Python Flask microservice secured across supply-chain pipeline phases, featuring automated container builds, SPDX-JSON SBOM generation, and automated vulnerability scanning.
+SigChain-SLSA is a security platform project designed to demonstrate DevSecOps practices and SLSA (Supply-chain Levels for Software Artifacts) framework compliance. This repository contains the base Python Flask microservice secured across supply-chain pipeline phases, featuring automated container builds, SPDX-JSON SBOM generation, automated vulnerability scanning, and cryptographic digital container signing/verification.
 
 ---
 
@@ -15,15 +16,19 @@ sigchain-slsa/
 ├── app/
 │   ├── app.py                  # Core Flask application (homepage & /health endpoints)
 │   └── requirements.txt        # Python dependencies (Flask, Gunicorn)
+├── security/                   # Automation & verification scripts
+│   ├── sign-and-verify.sh      # Cosign signing & tamper test script (Linux/macOS)
+│   └── sign-and-verify.ps1     # Cosign signing & tamper test script (Windows PowerShell)
 ├── security-artifacts/         # Output directory for security artifacts, SBOMs & scan reports
 │   └── .gitkeep                # Placeholder for git tracking (generated reports gitignored)
+├── cosign.pub                  # Public cryptographic verification key (committed to Git)
 ├── Dockerfile                  # Secure multi-stage container build file
 ├── .dockerignore               # Excludes unnecessary files from Docker build context
-├── .gitignore                  # Ignores local environment & cache files from Git
+├── .gitignore                  # Ignores local environment, private keys & build cache
 ├── README.md                   # Project documentation
 └── .github/
     └── workflows/
-        └── docker-build.yml    # CI/CD automation workflow (Build, SBOM & Vulnerability Scan)
+        └── docker-build.yml    # CI/CD automation workflow (Build, SBOM, Scan & Cosign Verify)
 ```
 
 ---
@@ -222,6 +227,94 @@ Vulnerability scan reports are generated in the `security-artifacts/` directory:
 
 ---
 
+## 🔏 Phase 4 – Digital Signing and Signature Verification
+
+```text
+Docker Image (sigchain-demo:latest)
+               ↓
+      Digest (SHA256)
+               ↓
+    Cosign (Private Key)
+               ↓
+     Digital Signature
+               ↓
+Cosign Verification (Public Key)
+               ↓
+  ┌────────────┴────────────┐
+  Valid                 Invalid / Unsigned
+  ↓                         ↓
+[Trusted Image]        [Untrusted Image - Rejected]
+```
+
+### 1. What is a Digital Signature?
+A **digital signature** is a cryptographic mechanism that binds an identity or authority to a specific software artifact (such as a container image digest). Using asymmetric key cryptography (ECDSA P-256), a digital signature proves two critical security properties:
+- **Authenticity:** Proves that the artifact was built and signed by an authorized entity holding the private key.
+- **Integrity:** Proves that the artifact has not been modified, corrupted, or tampered with since it was signed.
+
+### 2. Why Do Software Container Images Need Signatures?
+In modern cloud-native deployment pipelines, container images pass through multiple build steps, registries, and networks. Without digital signatures:
+- **Man-in-the-Middle (MitM) Attacks:** Attackers could replace an image with a malicious version.
+- **Registry Poisoning:** Compromised registries could swap image tags to point to altered binaries.
+- **Supply-Chain Tampering:** Unauthorized modifications could occur after security scans pass.
+
+Digital signatures provide mathematical proof that the container running in production is **exactly** the container built and verified by CI/CD.
+
+### 3. What is Sigstore Cosign?
+[Sigstore Cosign](https://github.com/sigstore/cosign) is an open-source tool for container image signing, verification, and storage in OCI registries. Developed under the Linux Foundation's Sigstore project, Cosign makes container signatures invisible, easy to manage, and developer-friendly.
+
+### 4. Roles of Private Key and Public Key
+- **Private Key (`cosign.key`):** Kept strictly secret by the build system. Used exclusively to generate the digital signature. **Must NEVER be committed to Git or exposed!**
+- **Public Key (`cosign.pub`):** Stored safely in the project repository and distributed publicly. Used by deployers, policy engines, and CI runners to verify that the signature matches the artifact digest.
+
+### 5. What Exactly is Being Signed?
+Cosign signs the **immutable cryptographic digest (SHA-256 manifest hash)** of the container image (`sigchain-demo:latest`), along with critical metadata (payload type, image reference, and timestamp). Signing the digest ensures that even if tag names change (e.g. `:latest`), the underlying container content is cryptographically locked.
+
+### 6. How Signature Verification Works
+1. Cosign extracts the container image digest (`sha256:...`).
+2. Cosign reads the public key (`cosign.pub`) and the digital signature bundle (`image.bundle`).
+3. Using ECDSA public-key cryptography, Cosign verifies the bundle signature against the digest payload.
+4. **Valid Match:** Cosign outputs `Verified OK` (exit code 0), confirming the image is authentic and untampered.
+5. **Mismatched / Unsigned:** Cosign outputs a verification error (non-zero exit code), rejecting untrusted artifacts.
+
+### 7. How Tampering or Unsigned Images are Detected
+- **Tampered Image:** If a single byte or layer of the container image is altered, its SHA-256 digest changes completely. Verifying the original bundle against the new digest fails cryptographic checks (`error verifying bundle: matching bundle to payload`).
+- **Unsigned Image:** An image missing a signature bundle fails verification immediately when checked against `cosign.pub`.
+
+### 8. CLI Commands for Local Testing
+
+#### Generate Cosign Key Pair:
+```bash
+# Non-interactive key pair generation (Passwordless for local dev/testing)
+COSIGN_PASSWORD="" cosign generate-key-pair
+```
+
+#### Extract Image Digest & Sign Image Digest (Bundle format):
+```bash
+# Extract SHA256 digest of sigchain-demo:latest
+docker inspect --format='{{index .Id}}' sigchain-demo:latest > security-artifacts/image-digest.txt
+
+# Sign container artifact using private key and Cosign bundle format
+COSIGN_PASSWORD="" cosign sign-blob --key cosign.key --bundle security-artifacts/image.bundle security-artifacts/image-digest.txt --yes
+```
+
+#### Verify Signature Bundle using Public Key:
+```bash
+cosign verify-blob --key cosign.pub --bundle security-artifacts/image.bundle security-artifacts/image-digest.txt
+```
+
+#### Test Local Signing & Verification via Automated Script:
+- **Linux / macOS (Bash):**
+  ```bash
+  chmod +x security/sign-and-verify.sh
+  ./security/sign-and-verify.sh
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  .\security\sign-and-verify.ps1
+  ```
+
+---
+
 ## 🔒 Security Best Practices Implemented in Dockerfile
 
 1. **Minimal Base Image:** Uses `python:3.11-slim` to reduce the attack surface and image size.
@@ -243,4 +336,8 @@ The GitHub Actions workflow automatically runs on `push` and `pull_request` even
 6. **SBOM Artifact Upload:** Uploads `sbom.spdx.json` as artifact `sbom-spdx-json` via `actions/upload-artifact@v4`.
 7. **Trivy Vulnerability Scan:** Scans `sigchain-demo:latest` using `aquasecurity/trivy-action@v0.36.0` (`exit-code: '0'`), generating machine-readable JSON (`trivy-report.json`) and human-readable text table (`trivy-report.txt`).
 8. **Log Summary Display:** Prints the human-readable vulnerability table and severity summary directly in the workflow runner log.
-9. **Vulnerability Artifact Upload:** Uploads both vulnerability reports (`trivy-report.json` and `trivy-report.txt`) as artifact bundle `vulnerability-reports`.
+9. **Vulnerability Artifact Upload:** Uploads vulnerability reports (`trivy-report.json` and `trivy-report.txt`) as artifact bundle `vulnerability-reports`.
+10. **Sigstore Cosign Installation:** Installs Cosign CLI runner via `sigstore/cosign-installer@v3.8.0`.
+11. **Phase 4 Signing & Verification:** Runs `security/sign-and-verify.sh` to generate key pairs, sign `sigchain-demo:latest` digest bundle, verify against `cosign.pub`, and demonstrate tamper detection.
+12. **Digital Signature Artifact Upload:** Uploads `cosign.pub`, `image-digest.txt`, and `image.bundle` as artifact `digital-signatures`.
+
