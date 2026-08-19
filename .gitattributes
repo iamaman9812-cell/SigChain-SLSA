@@ -1,0 +1,2 @@
+# Force LF line endings for shell scripts so they execute cleanly on Linux runners (GitHub Actions ubuntu-latest)
+*.sh text eol=lf
